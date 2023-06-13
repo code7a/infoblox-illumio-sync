@@ -112,7 +112,7 @@ get_infoblox_ip_addresses(){
     INFOBLOX_NETWORKS=($(curl -s -k "https://$INFOBLOX_USERNAME:$INFOBLOX_PASSWORD@$INFOBLOX_HOST/wapi/v$INFOBLOX_VERSION/network" | jq -r .[].network))
     #get infoblox ip address objects, exclude type dhcp reservations
     for NETWORK in "${INFOBLOX_NETWORKS[@]}";do
-        INFOBLOX_OBJECTS=$(curl -s -k "https://$INFOBLOX_USERNAME:$INFOBLOX_PASSWORD@$INFOBLOX_HOST/wapi/v$INFOBLOX_VERSION/ipv4address?network=$NETWORK&_max_results=100000&status=USED" | jq '.[]|select(.types[]=="RESERVATION"|not)|{ip_address,names}')
+        INFOBLOX_OBJECTS=$(curl -s -k "https://$INFOBLOX_USERNAME:$INFOBLOX_PASSWORD@$INFOBLOX_HOST/wapi/v$INFOBLOX_VERSION/ipv4address?network=$NETWORK&_max_results=100000&status=USED" | jq -c -r '.[]|select(.types[]=="RESERVATION"|not)|{ip_address,names}')
     done
 }
 
