@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 #infoblox to illumio sync
-version="0.0.1"
+version="0.0.2"
 #
 #Licensed under the Apache License, Version 2.0 (the "License"); you may not
 #use this file except in compliance with the License. You may obtain a copy of
@@ -46,7 +46,7 @@ EOF
 get_jq_version(){
     jq_version=$(jq --version)
     if [ $(echo $?) -ne 0 ]; then
-        echo "jq application not found. jq is a commandline JSON processor and is used to process and filter JSON inputs."
+        echo "jq application not found. jq is a command line JSON processor and is used to process and filter JSON inputs."
         echo "Reference: https://stedolan.github.io/jq/"
         echo "Please install jq, i.e. yum install jq"
         exit 1
@@ -107,16 +107,17 @@ print_infoblox_networks(){
 
 get_infoblox_ip_addresses(){
     #todo: account for nested networks
-    #todo: allow for ma results input, set to 100k
+    #todo: allow for max results input, set to 100k, notify if hit
     INFOBLOX_VERSION=$(curl -s -k "https://$INFOBLOX_USERNAME:$INFOBLOX_PASSWORD@$INFOBLOX_HOST/wapidoc/index.html" | grep 'The current WAPI version is' | cut -d' ' -f8 | cut -d. -f1-2)
     INFOBLOX_NETWORKS=($(curl -s -k "https://$INFOBLOX_USERNAME:$INFOBLOX_PASSWORD@$INFOBLOX_HOST/wapi/v$INFOBLOX_VERSION/network" | jq -r .[].network))
+    #get infoblox ip address objects, exclude type dhcp reservations
     for NETWORK in "${INFOBLOX_NETWORKS[@]}";do
-        INFOBLOX_OBJECTS=$(curl -s -k "https://$INFOBLOX_USERNAME:$INFOBLOX_PASSWORD@$INFOBLOX_HOST/wapi/v$INFOBLOX_VERSION/ipv4address?network=$NETWORK&_max_results=100000&status=USED" | jq -c -r '.[]|{ip_address,names}')
+        INFOBLOX_OBJECTS=$(curl -s -k "https://$INFOBLOX_USERNAME:$INFOBLOX_PASSWORD@$INFOBLOX_HOST/wapi/v$INFOBLOX_VERSION/ipv4address?network=$NETWORK&_max_results=100000&status=USED" | jq '.[]|select(.types[]=="RESERVATION"|not)|{ip_address,names}')
     done
 }
 
 print_infoblox_ip_addresses(){
-    echo -e "\nFound infoblox ip addresses records:"
+    echo -e "\nFound infoblox ip address records:"
     #loop through each ip address object
     echo $INFOBLOX_OBJECTS | jq -c -r | while read OBJECT; do
         echo $OBJECT
@@ -140,7 +141,7 @@ create_illumio_ip_lists(){
             body='{"name":"'$INFOBLOX_NETWORK_NAME'","description":"","ip_ranges":[{"from_ip":"'$INFOBLOX_NETWORK_CIDR'"}],"fqdns":[]}'
             IP_LIST_POST_RESPONSE=$(curl -s -X POST "https://$ILLUMIO_PCE_API_USERNAME:$ILLUMIO_PCE_API_SECRET@$ILLUMIO_PCE_DOMAIN:$ILLUMIO_PCE_PORT/api/v2/orgs/$ILLUMIO_PCE_ORG_ID/sec_policy/draft/ip_lists" -H 'content-type: application/json' --data "$body")
             IP_LIST_POST_RESPONSE_HREF=$(echo $IP_LIST_POST_RESPONSE | jq -r .href)
-            echo "IP list created and provisioned:"
+            echo -e "\nIP list created and provisioned:"
             curl -s -X POST "https://$ILLUMIO_PCE_API_USERNAME:$ILLUMIO_PCE_API_SECRET@$ILLUMIO_PCE_DOMAIN:$ILLUMIO_PCE_PORT/api/v2/orgs/$ILLUMIO_PCE_ORG_ID/sec_policy" -H 'content-type: application/json' --data-raw '{"update_description":"ip listed created from infoblox sync script","change_subset":{"ip_lists":[{"href":"'$IP_LIST_POST_RESPONSE_HREF'"}]}}'
             echo ""
         fi
@@ -151,7 +152,6 @@ create_illumio_unmanaged_workloads(){
     get_infoblox_ip_addresses
     echo $INFOBLOX_OBJECTS|jq -c -r | while read OBJECT; do
         INFOBLOX_OBJECT_IP_ADDRESS=$(echo $OBJECT | jq -c -r .ip_address)
-        #todo: what if multiple name objects?
         INFOBLOX_OBJECT_NAME=$(echo $OBJECT | jq -c -r .names[])
         #get workload by ip address
         WORKLOAD=$(curl -s "https://$ILLUMIO_PCE_API_USERNAME:$ILLUMIO_PCE_API_SECRET@$ILLUMIO_PCE_DOMAIN:$ILLUMIO_PCE_PORT/api/v2/orgs/$ILLUMIO_PCE_ORG_ID/workloads?ip_address=$INFOBLOX_OBJECT_IP_ADDRESS" | jq -c -r .[])
@@ -161,8 +161,9 @@ create_illumio_unmanaged_workloads(){
             if [ ! -n "$INFOBLOX_OBJECT_NAME" ]; then
                 INFOBLOX_OBJECT_NAME=$INFOBLOX_OBJECT_IP_ADDRESS
             fi
-            echo "Unmanaged workload created:"
-            curl -X POST "https://$ILLUMIO_PCE_API_USERNAME:$ILLUMIO_PCE_API_SECRET@$ILLUMIO_PCE_DOMAIN:$ILLUMIO_PCE_PORT/api/v2/orgs/$ILLUMIO_PCE_ORG_ID/workloads" -H 'content-type: application/json' --data-raw '{"name":"'$INFOBLOX_OBJECT_NAME'","hostname":"'$INFOBLOX_OBJECT_NAME'","interfaces":[{"address":"'$INFOBLOX_OBJECT_IP_ADDRESS'","name":"eth0"}]}'
+            echo -e "\nUnmanaged workload created:"
+            body='{"name":"'$INFOBLOX_OBJECT_NAME'","hostname":"'$INFOBLOX_OBJECT_NAME'","interfaces":[{"address":"'$INFOBLOX_OBJECT_IP_ADDRESS'","name":"eth0"}]}'
+            curl -X POST "https://$ILLUMIO_PCE_API_USERNAME:$ILLUMIO_PCE_API_SECRET@$ILLUMIO_PCE_DOMAIN:$ILLUMIO_PCE_PORT/api/v2/orgs/$ILLUMIO_PCE_ORG_ID/workloads" -H 'content-type: application/json' --data "$body"
             echo ""
         fi
     done
