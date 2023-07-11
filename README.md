@@ -39,5 +39,5 @@ examples:
 
 #### Notes:
 Only read permissions are required for infoblox.\
-Read and write permissions are required for illumio PCE.\
+Global Administrator permissions are required for illumio PCE.\
 Only clone to/execute from a user profile with restrictive permissions.

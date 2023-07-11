@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 #infoblox to illumio sync
-version="0.0.2"
+version="0.0.3"
 #
 #Licensed under the Apache License, Version 2.0 (the "License"); you may not
 #use this file except in compliance with the License. You may obtain a copy of
@@ -94,15 +94,9 @@ get_infoblox_networks(){
     #todo: account for nested networks
     INFOBLOX_VERSION=$(curl -s -k "https://$INFOBLOX_USERNAME:$INFOBLOX_PASSWORD@$INFOBLOX_HOST/wapidoc/index.html" | grep 'The current WAPI version is' | cut -d' ' -f8 | cut -d. -f1-2)
     INFOBLOX_NETWORKS=$(curl -s -k "https://$INFOBLOX_USERNAME:$INFOBLOX_PASSWORD@$INFOBLOX_HOST/wapi/v$INFOBLOX_VERSION/network" | jq -c -r '.[]|{comment,network}')
-}
-
-print_infoblox_networks(){
-    echo -e "\nFound infoblox networks:"
-    #loop through each network
-    echo $INFOBLOX_NETWORKS | jq -c -r | while read OBJECT; do
-        echo $OBJECT
-    done
-    echo ""
+    INFOBLOX_NETWORKS_GET_FILENAME="INFOBLOX-NETWORKS-GET-$(date +%Y.%m.%dT%H.%M.%S).log"
+    echo $INFOBLOX_NETWORKS > $INFOBLOX_NETWORKS_GET_FILENAME
+    echo -e "\nFound infoblox networks > $INFOBLOX_NETWORKS_GET_FILENAME"
 }
 
 get_infoblox_ip_addresses(){
@@ -111,18 +105,13 @@ get_infoblox_ip_addresses(){
     INFOBLOX_VERSION=$(curl -s -k "https://$INFOBLOX_USERNAME:$INFOBLOX_PASSWORD@$INFOBLOX_HOST/wapidoc/index.html" | grep 'The current WAPI version is' | cut -d' ' -f8 | cut -d. -f1-2)
     INFOBLOX_NETWORKS=($(curl -s -k "https://$INFOBLOX_USERNAME:$INFOBLOX_PASSWORD@$INFOBLOX_HOST/wapi/v$INFOBLOX_VERSION/network" | jq -r .[].network))
     #get infoblox ip address objects, exclude type dhcp reservations
+    INFOBLOX_OBJECTS=()
     for NETWORK in "${INFOBLOX_NETWORKS[@]}";do
-        INFOBLOX_OBJECTS=$(curl -s -k "https://$INFOBLOX_USERNAME:$INFOBLOX_PASSWORD@$INFOBLOX_HOST/wapi/v$INFOBLOX_VERSION/ipv4address?network=$NETWORK&_max_results=100000&status=USED" | jq -c -r '.[]|select(.types[]=="RESERVATION"|not)|{ip_address,names}')
+        INFOBLOX_OBJECTS+=($(curl -s -k "https://$INFOBLOX_USERNAME:$INFOBLOX_PASSWORD@$INFOBLOX_HOST/wapi/v$INFOBLOX_VERSION/ipv4address?network=$NETWORK&_max_results=100000&status=USED" | jq -c -r '.[]|select(.types[]=="RESERVATION"|not)|{ip_address,names}'))
     done
-}
-
-print_infoblox_ip_addresses(){
-    echo -e "\nFound infoblox ip address records:"
-    #loop through each ip address object
-    echo $INFOBLOX_OBJECTS | jq -c -r | while read OBJECT; do
-        echo $OBJECT
-    done
-    echo ""
+    INFOBLOX_OBJECTS_GET_FILENAME="INFOBLOX-OBJECTS-GET-$(date +%Y.%m.%dT%H.%M.%S).log"
+    echo ${INFOBLOX_OBJECTS[@]} > $INFOBLOX_OBJECTS_GET_FILENAME
+    echo -e "\nFound infoblox ip address records > $INFOBLOX_OBJECTS_GET_FILENAME"
 }
 
 create_illumio_ip_lists(){
@@ -138,11 +127,9 @@ create_illumio_ip_lists(){
             if [ ! -n "$INFOBLOX_NETWORK_NAME" ]; then
                 INFOBLOX_NETWORK_NAME=$INFOBLOX_NETWORK_CIDR
             fi
-            body='{"name":"'$INFOBLOX_NETWORK_NAME'","description":"","ip_ranges":[{"from_ip":"'$INFOBLOX_NETWORK_CIDR'"}],"fqdns":[]}'
-            IP_LIST_POST_RESPONSE=$(curl -s -X POST "https://$ILLUMIO_PCE_API_USERNAME:$ILLUMIO_PCE_API_SECRET@$ILLUMIO_PCE_DOMAIN:$ILLUMIO_PCE_PORT/api/v2/orgs/$ILLUMIO_PCE_ORG_ID/sec_policy/draft/ip_lists" -H 'content-type: application/json' --data "$body")
-            IP_LIST_POST_RESPONSE_HREF=$(echo $IP_LIST_POST_RESPONSE | jq -r .href)
-            echo -e "\nIP list created and provisioned:"
-            curl -s -X POST "https://$ILLUMIO_PCE_API_USERNAME:$ILLUMIO_PCE_API_SECRET@$ILLUMIO_PCE_DOMAIN:$ILLUMIO_PCE_PORT/api/v2/orgs/$ILLUMIO_PCE_ORG_ID/sec_policy" -H 'content-type: application/json' --data-raw '{"update_description":"ip listed created from infoblox sync script","change_subset":{"ip_lists":[{"href":"'$IP_LIST_POST_RESPONSE_HREF'"}]}}'
+            echo -e "\nIP list drafted:"
+            body='{"name":"IPL-'$INFOBLOX_NETWORK_NAME'","description":"Created by infoblox-illumio-sync.sh","ip_ranges":[{"from_ip":"'$INFOBLOX_NETWORK_CIDR'"}],"fqdns":[]}'
+            curl -s -X POST "https://$ILLUMIO_PCE_API_USERNAME:$ILLUMIO_PCE_API_SECRET@$ILLUMIO_PCE_DOMAIN:$ILLUMIO_PCE_PORT/api/v2/orgs/$ILLUMIO_PCE_ORG_ID/sec_policy/draft/ip_lists" -H 'content-type: application/json' --data "$body"
             echo ""
         fi
     done
@@ -150,7 +137,7 @@ create_illumio_ip_lists(){
 
 create_illumio_unmanaged_workloads(){
     get_infoblox_ip_addresses
-    echo $INFOBLOX_OBJECTS|jq -c -r | while read OBJECT; do
+    for OBJECT in "${INFOBLOX_OBJECTS[@]}"; do
         INFOBLOX_OBJECT_IP_ADDRESS=$(echo $OBJECT | jq -c -r .ip_address)
         INFOBLOX_OBJECT_NAME=$(echo $OBJECT | jq -c -r .names[])
         #get workload by ip address
@@ -159,10 +146,10 @@ create_illumio_unmanaged_workloads(){
         if [ ! -n "$WORKLOAD" ]; then
             #if no name, update name with ip address
             if [ ! -n "$INFOBLOX_OBJECT_NAME" ]; then
-                INFOBLOX_OBJECT_NAME=$INFOBLOX_OBJECT_IP_ADDRESS
+                INFOBLOX_OBJECT_NAME="UMW-$INFOBLOX_OBJECT_IP_ADDRESS"
             fi
             echo -e "\nUnmanaged workload created:"
-            body='{"name":"'$INFOBLOX_OBJECT_NAME'","hostname":"'$INFOBLOX_OBJECT_NAME'","interfaces":[{"address":"'$INFOBLOX_OBJECT_IP_ADDRESS'","name":"eth0"}]}'
+            body='{"name":"'$INFOBLOX_OBJECT_NAME'","description":"Created by infoblox-illumio-sync.sh","hostname":"'$INFOBLOX_OBJECT_NAME'","interfaces":[{"address":"'$INFOBLOX_OBJECT_IP_ADDRESS'","name":"umw0"}]}'
             curl -X POST "https://$ILLUMIO_PCE_API_USERNAME:$ILLUMIO_PCE_API_SECRET@$ILLUMIO_PCE_DOMAIN:$ILLUMIO_PCE_PORT/api/v2/orgs/$ILLUMIO_PCE_ORG_ID/workloads" -H 'content-type: application/json' --data "$body"
             echo ""
         fi
@@ -184,12 +171,10 @@ do
     case $1 in
         -n|--get-networks)
             get_infoblox_networks
-            print_infoblox_networks
             exit 0
             ;;
         -i|--get-ips)
             get_infoblox_ip_addresses
-            print_infoblox_ip_addresses
             exit 0
             ;;
         -l|--create-ip-lists)
