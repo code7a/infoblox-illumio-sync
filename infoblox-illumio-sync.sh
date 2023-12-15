@@ -129,7 +129,7 @@ create_illumio_ip_lists(){
             fi
             echo -e "\nIP list drafted:"
             body='{"name":"IPL-'$INFOBLOX_NETWORK_NAME'","description":"Created by infoblox-illumio-sync.sh","ip_ranges":[{"from_ip":"'$INFOBLOX_NETWORK_CIDR'"}],"fqdns":[]}'
-            curl -s -X POST "https://$ILLUMIO_PCE_API_USERNAME:$ILLUMIO_PCE_API_SECRET@$ILLUMIO_PCE_DOMAIN:$ILLUMIO_PCE_PORT/api/v2/orgs/$ILLUMIO_PCE_ORG_ID/sec_policy/draft/ip_lists" -H 'content-type: application/json' --data "$body"
+            curl -X POST "https://$ILLUMIO_PCE_API_USERNAME:$ILLUMIO_PCE_API_SECRET@$ILLUMIO_PCE_DOMAIN:$ILLUMIO_PCE_PORT/api/v2/orgs/$ILLUMIO_PCE_ORG_ID/sec_policy/draft/ip_lists" -H 'content-type: application/json' --data "$body"
             echo ""
         fi
     done
@@ -146,7 +146,7 @@ create_illumio_unmanaged_workloads(){
         if [ ! -n "$WORKLOAD" ]; then
             #if no name, update name with ip address
             if [ ! -n "$INFOBLOX_OBJECT_NAME" ]; then
-                INFOBLOX_OBJECT_NAME="UMW-$INFOBLOX_OBJECT_IP_ADDRESS"
+                INFOBLOX_OBJECT_NAME="umw-$INFOBLOX_OBJECT_IP_ADDRESS"
             fi
             echo -e "\nUnmanaged workload created:"
             body='{"name":"'$INFOBLOX_OBJECT_NAME'","description":"Created by infoblox-illumio-sync.sh","hostname":"'$INFOBLOX_OBJECT_NAME'","interfaces":[{"address":"'$INFOBLOX_OBJECT_IP_ADDRESS'","name":"umw0"}]}'
